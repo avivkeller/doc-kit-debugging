@@ -5,8 +5,11 @@ import { getSortedHeadNodes } from './utils/getSortedHeadNodes.mjs';
 import { buildNotFoundPage } from './utils/synthetic/404.mjs';
 import { buildAllPage } from './utils/synthetic/all.mjs';
 import { buildIndexPage } from './utils/synthetic/index.mjs';
+import logger from '../../logger/index.mjs';
 import getConfig from '../../utils/configuration/index.mjs';
 import { groupNodesByModule } from '../../utils/generators.mjs';
+
+const jsxLogger = logger.child('jsx-ast');
 
 /**
  * Builds the `{ head, entries }` page descriptors for all configured synthetic
@@ -18,6 +21,13 @@ import { groupNodesByModule } from '../../utils/generators.mjs';
  */
 const buildSyntheticDescriptors = input => {
   const config = getConfig('jsx-ast');
+
+  jsxLogger.debug('Building synthetic page descriptors', {
+    input: input.length,
+    allPage: config.generateAllPage,
+    indexPage: config.generateIndexPage,
+    notFoundPage: config.generateNotFoundPage,
+  });
 
   return [
     config.generateAllPage && buildAllPage(input),
@@ -41,15 +51,31 @@ const buildSyntheticDescriptors = input => {
 export async function processChunk(slicedInput, itemIndices) {
   const results = [];
 
+  jsxLogger.debug('processChunk started', { items: itemIndices.length });
+
   for (const idx of itemIndices) {
     const { head, entries } = slicedInput[idx];
+
+    jsxLogger.debug(`Building page "${head.api}"`, {
+      entries: entries.length,
+      synthetic: head.synthetic === true,
+    });
+
+    const buildStart = performance.now();
 
     const content = await buildContent(entries, head);
 
     const { value: code } = toJs(content, { handlers: jsx });
 
+    jsxLogger.debug(`Built page "${head.api}"`, {
+      codeLength: code.length,
+      durationMs: Math.round(performance.now() - buildStart),
+    });
+
     results.push({ data: content.data, code });
   }
+
+  jsxLogger.debug('processChunk completed', { results: results.length });
 
   return results;
 }
@@ -60,6 +86,8 @@ export async function processChunk(slicedInput, itemIndices) {
  * @type {import('./types').Generator['generate']}
  */
 export async function* generate(input, worker) {
+  jsxLogger.debug('Generation started', { entries: input.length });
+
   // The synthetic `index` page replaces the Core `index` document.
   const moduleInput = input.filter(entry => entry.api !== 'index');
 
@@ -71,11 +99,31 @@ export async function* generate(input, worker) {
     entries: groupedModules.get(head.api),
   }));
 
+  jsxLogger.debug('Grouped entries into module descriptors', {
+    modules: descriptors.length,
+    entries: input.length,
+  });
+
   // Process the synthetic pages through the worker pool as well, so their
   // (potentially enormous) content is built and converted off the main thread.
   descriptors.push(...buildSyntheticDescriptors(moduleInput));
 
+  jsxLogger.debug('Dispatching descriptors to worker pool', {
+    descriptors: descriptors.length,
+  });
+
+  let pages = 0;
+
   for await (const chunkResult of worker.stream(descriptors)) {
+    pages += chunkResult.length;
+
+    jsxLogger.debug('Received chunk result', {
+      pages: chunkResult,
+      totalPages: pages,
+    });
+
     yield chunkResult;
   }
+
+  jsxLogger.debug('Generation completed', { totalPages: pages });
 }

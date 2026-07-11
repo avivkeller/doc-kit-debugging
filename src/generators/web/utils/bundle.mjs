@@ -4,8 +4,11 @@ import virtual from '@rollup/plugin-virtual';
 import { build } from 'rolldown';
 
 import cssLoader from './css.mjs';
+import logger from '../../../logger/index.mjs';
 import getConfig from '../../../utils/configuration/index.mjs';
 import { lazy } from '../../../utils/misc.mjs';
+
+const bundleLogger = logger.child('web:bundle');
 
 // Resolve node_modules relative to this package (doc-kit), not cwd.
 // We do this by finding where one of our dependencies (preact) is stored,
@@ -40,6 +43,14 @@ export default async function bundleCode(
   const config = getConfig('web');
 
   const { rolldown = {} } = config;
+
+  bundleLogger.debug(`Starting ${server ? 'server' : 'client'} bundle`, {
+    entries: codeMap.size,
+    virtualImports: Object.keys(virtualImports),
+    nodeModules: await getNodeModules(),
+  });
+
+  const buildStart = performance.now();
 
   const result = await build({
     ...rolldown,
@@ -159,6 +170,14 @@ export default async function bundleCode(
   const chunks = result.output.filter(c => c.type === 'chunk');
 
   const importMap = assets.find(c => c.fileName === 'importmap.json');
+
+  bundleLogger.debug(`Completed ${server ? 'server' : 'client'} bundle`, {
+    durationMs: Math.round(performance.now() - buildStart),
+    assets: assets.length,
+    chunks: chunks.length,
+    entryChunks: chunks.filter(c => c.isEntry).length,
+    hasImportMap: importMap != null,
+  });
 
   return {
     css: assets

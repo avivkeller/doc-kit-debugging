@@ -32,8 +32,11 @@ import {
   GITHUB_BLOB_URL,
   populate,
 } from '../../../utils/configuration/templates.mjs';
+import logger from '../../../logger/index.mjs';
 import { UNIST } from '../../../utils/queries/index.mjs';
 import { getRemarkRecma as remark } from '../../../utils/remark.mjs';
+
+const contentLogger = logger.child('jsx-ast:buildContent');
 
 /**
  * Processes lifecycle and change history data into a sorted array of change entries.
@@ -253,6 +256,10 @@ export const transformHeadingNode = async (entry, node, index, parent) => {
  * @param {import('../../metadata/types').MetadataEntry} entry - The API metadata entry to process
  */
 export const processEntry = entry => {
+  contentLogger.debug(`Processing entry "${entry.heading?.data?.slug}"`, {
+    api: entry.api,
+  });
+
   // Visit and transform stability nodes
   visit(entry.content, UNIST.isStabilityNode, transformStabilityNode);
 
@@ -280,14 +287,24 @@ export const processEntry = entry => {
  * @param {Object} metadata - Raw page metadata from the head entry
  */
 export const createDocumentLayout = (entries, metadata) => {
+  contentLogger.debug(`Creating document layout for "${metadata.api}"`, {
+    entries: entries.length,
+  });
+
   // Collapse overloaded function headings into one stable ToC entry, tagging the
   // underlying headings with compact anchors / overload flags read just below.
   annotateOverloads(entries);
 
+  const headings = extractHeadings(entries);
+
+  contentLogger.debug(`Extracted headings for "${metadata.api}"`, {
+    headings: headings.length,
+  });
+
   return createTree('root', [
     createJSXElement(JSX_IMPORTS.Layout.name, {
       metadata,
-      headings: extractHeadings(entries),
+      headings,
       readingTime: readingTime(extractTextContent(entries)).text,
       children: entries.map(processEntry),
     }),
@@ -314,8 +331,14 @@ const buildContent = async (metadataEntries, head) => {
   // Create root document AST with all layout components and processed content
   const root = createDocumentLayout(metadataEntries, metadata);
 
+  contentLogger.debug(`Running remark transform for "${head.api}"`);
+
   // Run remark processor to transform AST (parse markdown, plugins, etc.)
   const ast = await remark().run(root);
+
+  contentLogger.debug(`Remark transform completed for "${head.api}"`, {
+    bodyNodes: ast.body.length,
+  });
 
   // The final MDX content is the expression in the Program's first body node
   return { ...ast.body[0].expression, data: head };

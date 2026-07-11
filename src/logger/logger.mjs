@@ -140,6 +140,13 @@ export const createLogger = (
   };
 
   /**
+   * Returns the current numeric log level.
+   *
+   * @returns {number}
+   */
+  const getLogLevel = () => currentLevel;
+
+  /**
    * Sets the log level for this logger instance and all child loggers.
    *
    * @param {number | string} level - Log level (number) or level name (string)
@@ -172,6 +179,7 @@ export const createLogger = (
     fatal,
     debug,
     child,
+    getLogLevel,
     setLogLevel,
   };
 };

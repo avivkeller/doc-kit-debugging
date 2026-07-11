@@ -1,11 +1,16 @@
 'use strict';
 
 import { createSyntheticHead, wrapAsEntry } from './synthetic.mjs';
+import logger from '../../../../logger/index.mjs';
+
+const syntheticLogger = logger.child('jsx-ast:synthetic');
 
 /**
  * Builds the page descriptor for `404.html`
  */
 export const buildNotFoundPage = () => {
+  syntheticLogger.debug('Building "404" page descriptor');
+
   const head = createSyntheticHead('404', 'Page Not Found');
 
   return {

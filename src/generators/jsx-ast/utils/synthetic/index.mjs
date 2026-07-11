@@ -3,9 +3,12 @@
 import { h as createElement } from 'hastscript';
 
 import { createSyntheticHead, wrapAsEntry } from './synthetic.mjs';
+import logger from '../../../../logger/index.mjs';
 import { JSX_IMPORTS } from '../../../web/constants.mjs';
 import { createJSXElement } from '../ast.mjs';
 import { getSortedHeadNodes } from '../getSortedHeadNodes.mjs';
+
+const syntheticLogger = logger.child('jsx-ast:synthetic');
 
 const STABILITY_BADGE_KINDS = [
   'error',
@@ -70,12 +73,15 @@ export const buildIndexPage = entries => {
   const head = createSyntheticHead('index', 'Index');
   const moduleEntries = getSortedHeadNodes(entries);
 
+  const stabilityEntries = moduleEntries.filter(entry => entry.stability);
+
+  syntheticLogger.debug('Building "index" page descriptor', {
+    modules: moduleEntries.length,
+    withStability: stabilityEntries.length,
+  });
+
   return {
     head,
-    entries: [
-      wrapAsEntry(head, [
-        buildStabilityOverview(moduleEntries.filter(entry => entry.stability)),
-      ]),
-    ],
+    entries: [wrapAsEntry(head, [buildStabilityOverview(stabilityEntries)])],
   };
 };

@@ -2,7 +2,10 @@ import { readFile } from 'node:fs/promises';
 
 import { bundleAsync } from 'lightningcss-wasm';
 
+import logger from '../../../logger/index.mjs';
 import getConfig from '../../../utils/configuration/index.mjs';
+
+const cssLogger = logger.child('web:css');
 
 // Since we use rolldown to bundle multiple times,
 // we re-use a lot of CSS files, so there is no
@@ -49,6 +52,8 @@ export default () => {
         if (fileCache.has(id)) {
           const cached = fileCache.get(id);
 
+          cssLogger.debug(`CSS cache hit for "${id}"`);
+
           // Collect the CSS as normal
           cssChunks.add(cached.code);
 
@@ -57,6 +62,10 @@ export default () => {
             moduleType: 'js',
           };
         }
+
+        cssLogger.debug(`Compiling CSS file "${id}"`, {
+          cssModules: id.endsWith('module.css'),
+        });
 
         // Read the raw CSS file from disk
         const source = await (lightningcss.resolver?.read ?? readFile)(
@@ -90,6 +99,11 @@ export default () => {
           Object.entries(exports ?? {}).map(([key, value]) => [key, value.name])
         );
 
+        cssLogger.debug(`Compiled CSS file "${id}"`, {
+          cssLength: css.length,
+          exports: Object.keys(mappedExports).length,
+        });
+
         // Cache result
         fileCache.set(id, { code: css, exports: mappedExports });
 
@@ -108,14 +122,23 @@ export default () => {
     buildEnd() {
       // If no CSS chunks were processed, skip emitting
       if (cssChunks.size === 0) {
+        cssLogger.debug('No CSS chunks collected, skipping styles.css');
+
         return;
       }
+
+      const source = Array.from(cssChunks).join('');
+
+      cssLogger.debug('Emitting styles.css', {
+        chunks: cssChunks.size,
+        cssLength: source.length,
+      });
 
       // Concatenate all collected CSS strings and emit as a build asset
       this.emitFile({
         type: 'asset',
         name: 'styles.css',
-        source: Array.from(cssChunks).join(''),
+        source,
       });
     },
   };

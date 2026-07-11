@@ -8,11 +8,14 @@ import { createChunkedRequire } from './chunks.mjs';
 import createConfigSource from './config.mjs';
 import createASTBuilder from './generate.mjs';
 import { relativeOrAbsolute } from './relativeOrAbsolute.mjs';
+import logger from '../../../logger/index.mjs';
 import getConfig from '../../../utils/configuration/index.mjs';
 import { populate } from '../../../utils/configuration/templates.mjs';
 import { minifyHTML } from '../../../utils/html-minifier.mjs';
 import { SPECULATION_RULES } from '../constants.mjs';
 import { THEME_SCRIPT } from '../ui/theme-script.mjs';
+
+const processingLogger = logger.child('web:processing');
 
 /**
  * Populates a template string by evaluating it as a JavaScript template literal,
@@ -102,6 +105,10 @@ export function createCodeConverter() {
     add: ({ data, code }) => {
       const fileName = `${data.api}.jsx`;
 
+      processingLogger.debug(`Converting page code for "${fileName}"`, {
+        codeLength: code.length,
+      });
+
       // Prepare code for server-side execution (wrapped for SSR)
       serverCodeMap.set(fileName, buildServerProgram(code));
 
@@ -130,6 +137,12 @@ async function executeServerCode(serverCodeMap, requireFn, virtualImports) {
   const entryChunks = chunks.filter(c => c.isEntry);
   const otherChunks = chunks.filter(c => !c.isEntry);
 
+  processingLogger.debug('Server bundle built, executing entries', {
+    entryChunks: entryChunks.length,
+    sharedChunks: otherChunks.length,
+    cssLength: css.length,
+  });
+
   // Create enhanced require function that can resolve code-split chunks
   const enhancedRequire = createChunkedRequire(otherChunks, requireFn);
 
@@ -137,9 +150,17 @@ async function executeServerCode(serverCodeMap, requireFn, virtualImports) {
 
   // Execute each bundled entry and collect dehydrated HTML results
   for (const chunk of entryChunks) {
+    processingLogger.debug(`Executing server entry "${chunk.fileName}"`, {
+      codeLength: chunk.code.length,
+    });
+
     const executedFunction = new Function('require', chunk.code);
     const dehydratedHtml = await executedFunction(enhancedRequire);
     pages.set(chunk.fileName, dehydratedHtml);
+
+    processingLogger.debug(`Rendered server entry "${chunk.fileName}"`, {
+      htmlLength: dehydratedHtml.length,
+    });
   }
 
   return { pages, css };
@@ -172,12 +193,24 @@ export async function processBundles({
     ...config.virtualImports,
   };
 
+  processingLogger.debug('Bundling server and client code', {
+    serverEntries: serverCodeMap.size,
+    clientEntries: clientCodeMap.size,
+    virtualImports: Object.keys(virtualImports),
+  });
+
   // Bundle server and client code in parallel. Both need all entries for
   // code-splitting, but are independent of each other.
   const [serverBundle, clientBundle] = await Promise.all([
     executeServerCode(serverCodeMap, requireFn, virtualImports),
     bundleCode(clientCodeMap, virtualImports),
   ]);
+
+  processingLogger.debug('Server and client bundles completed', {
+    serverPages: serverBundle.pages.size,
+    clientChunks: clientBundle.chunks.length,
+    hasImportMap: clientBundle.importMap != null,
+  });
 
   const titleSuffix = populate(config.title, {
     ...config,
@@ -189,11 +222,20 @@ export async function processBundles({
   // template authors avoid nested template-literal escaping.
   const head = buildHead(config.head);
 
+  processingLogger.debug('Rendering final HTML pages', {
+    pages: datas.length,
+  });
+
   // Render final HTML pages
   const results = await Promise.all(
     datas.map(async data => {
       const root = resolvePageRoot(data);
       const title = data.title ?? data.heading.data.name;
+
+      processingLogger.debug(`Rendering page "${data.api}"`, {
+        root,
+        dehydrated: serverBundle.pages.has(`${data.api}.js`),
+      });
 
       // Replace template placeholders with actual content
       const renderedHtml = populateWithEvaluation(template, {
@@ -220,6 +262,11 @@ export async function processBundles({
   const { code: minifiedCSS } = transform({
     code: Buffer.from(`${serverBundle.css}\n${clientBundle.css}`),
     minify: true,
+  });
+
+  processingLogger.debug('Minified combined CSS', {
+    inputLength: serverBundle.css.length + clientBundle.css.length,
+    outputLength: minifiedCSS.length,
   });
 
   return { results, chunks: clientBundle.chunks, css: minifiedCSS };

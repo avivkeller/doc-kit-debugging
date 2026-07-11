@@ -1,4 +1,5 @@
 import { allGenerators } from '../generators/index.mjs';
+import logger from '../logger/index.mjs';
 import { setConfig } from '../utils/configuration/index.mjs';
 
 /**
@@ -14,7 +15,12 @@ export default async ({
   itemIndices,
   extra,
   configuration,
+  logLevel,
 }) => {
+  if (logLevel !== undefined) {
+    logger.setLogLevel(logLevel);
+  }
+
   await setConfig(configuration);
 
   const generator = allGenerators[generatorName];

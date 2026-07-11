@@ -52,6 +52,9 @@ const createTask = (
     configuration: {
       [generatorName]: configuration[generatorName],
     },
+    // Workers construct their own logger; forward the main thread's level so
+    // `--log-level debug` also surfaces logs from inside `processChunk`.
+    logLevel: logger.getLogLevel(),
   };
 };
 

@@ -5,8 +5,11 @@ import { join } from 'node:path';
 
 import { copyStaticAssets } from './utils/copying.mjs';
 import { createCodeConverter, processBundles } from './utils/processing.mjs';
+import logger from '../../logger/index.mjs';
 import getConfig from '../../utils/configuration/index.mjs';
 import { writeFile } from '../../utils/file.mjs';
+
+const webLogger = logger.child('web');
 
 /**
  * Main generation function that bundles per-page JSX code into web output.
@@ -21,7 +24,17 @@ import { writeFile } from '../../utils/file.mjs';
 export async function generate(input) {
   const config = getConfig('web');
 
+  webLogger.debug('Generation started', {
+    items: input.length,
+    output: config.output ?? null,
+  });
+
   const template = await readFile(config.templatePath, 'utf-8');
+
+  webLogger.debug('Template loaded', {
+    templatePath: config.templatePath,
+    templateLength: template.length,
+  });
 
   const converter = createCodeConverter();
 
@@ -40,6 +53,11 @@ export async function generate(input) {
     .filter(data => data.synthetic !== true)
     .map(data => ({ data }));
 
+  webLogger.debug('Accumulated page code', {
+    pages: datas.length,
+    sidebarEntries: sidebarEntries.length,
+  });
+
   const { results, css, chunks } = await processBundles({
     serverCodeMap: converter.serverCodeMap,
     clientCodeMap: converter.clientCodeMap,
@@ -48,12 +66,28 @@ export async function generate(input) {
     template,
   });
 
+  webLogger.debug('Bundles processed', {
+    results: results.length,
+    chunks: chunks.length,
+    cssLength: css.length,
+  });
+
   if (config.output) {
+    webLogger.debug('Writing output files', { output: config.output });
+
     for (const { html, path } of results) {
+      webLogger.debug(`Writing page "${path}.html"`, {
+        htmlLength: html.length,
+      });
+
       await writeFile(join(config.output, `${path}.html`), html, 'utf-8');
     }
 
     for (const chunk of chunks) {
+      webLogger.debug(`Writing chunk "${chunk.fileName}"`, {
+        codeLength: chunk.code.length,
+      });
+
       await writeFile(join(config.output, chunk.fileName), chunk.code, 'utf-8');
     }
 
@@ -61,6 +95,8 @@ export async function generate(input) {
 
     await copyStaticAssets(config);
   }
+
+  webLogger.debug('Generation completed', { pages: results.length });
 
   return results.map(({ html }) => ({ html: html.toString(), css }));
 }
